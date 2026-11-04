@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# TEST STAND-IN for pg_dump: writes a fake archive. Not a real dump.
+for a in "$@"; do case "$a" in --file=*) out="${a#--file=}";; esac; done
+[ "${FAKE_PGDUMP_FAIL:-}" = "1" ] && { echo "pg_dump: connection refused" >&2; echo partial > "$out"; exit 1; }
+[ "${FAKE_PGDUMP_EMPTY:-}" = "1" ] && { : > "$out"; exit 0; }
+printf 'FAKEPGDMP' > "$out"

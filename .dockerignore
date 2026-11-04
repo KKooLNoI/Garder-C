@@ -1,0 +1,6 @@
+.next
+node_modules
+.pgdata
+.env
+judge0.conf
+.git

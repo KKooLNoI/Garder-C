@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# TEST STAND-IN for pg_restore: accepts files starting with FAKEPGDMP.
+for a in "$@"; do case "$a" in --list|--clean|--if-exists|--no-owner|--exit-on-error|--dbname=*) ;; *) f="$a";; esac; done
+head -c 9 "$f" 2>/dev/null | grep -q FAKEPGDMP || { echo "pg_restore: not a valid archive" >&2; exit 1; }
+[ "${FAKE_RESTORE_LOG:-}" ] && echo "restored $f" >> "$FAKE_RESTORE_LOG"
+exit 0

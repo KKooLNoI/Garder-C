@@ -1,0 +1,239 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  STUDENT
+  ADMIN
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum SubmissionStatus {
+  PENDING
+  RUNNING
+  ACCEPTED
+  WRONG_ANSWER
+  COMPILATION_ERROR
+  RUNTIME_ERROR
+  TIME_LIMIT_EXCEEDED
+  MEMORY_LIMIT_EXCEEDED
+  SYSTEM_ERROR
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(STUDENT)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions       UserSession[]
+  submissions    Submission[]
+  progress       UserProgress[]
+  lessonProgress LessonProgress[]
+  auditLogs      AuditLog[]
+  codeDrafts     CodeDraft[]
+}
+
+model UserSession {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  // SHA-256 of the cookie token; the raw token is never stored.
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Lesson {
+  id          String   @id @default(uuid()) @db.Uuid
+  title       String
+  slug        String   @unique
+  description String
+  content     String   @default("")
+  orderIndex  Int
+  isPublished Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  problems Problem[]
+  progress LessonProgress[]
+
+  @@index([orderIndex])
+}
+
+model Problem {
+  id            String     @id @default(uuid()) @db.Uuid
+  lessonId      String     @db.Uuid
+  number        Int        @unique @default(autoincrement())
+  title         String
+  slug          String     @unique
+  statement     String
+  inputFormat   String
+  outputFormat  String
+  constraints   String
+  difficulty    Difficulty
+  score         Int
+  timeLimitMs   Int        @default(1000)
+  memoryLimitMb Int        @default(64)
+  starterCode   String
+  explanation   String     @default("")
+  hints         String[]
+  // Comparison config: whitespace normalisation and float tolerance.
+  normalizeWhitespace Boolean @default(true)
+  floatTolerance      Float?
+  // Bumped whenever statement/limits/tests change; submissions pin the version they ran against.
+  version       Int        @default(1)
+  isPublished   Boolean    @default(false)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  lesson      Lesson       @relation(fields: [lessonId], references: [id])
+  testCases   TestCase[]
+  submissions Submission[]
+  progress    UserProgress[]
+  versions    ProblemVersion[]
+  codeDrafts  CodeDraft[]
+
+  @@index([lessonId])
+  @@index([isPublished, difficulty])
+}
+
+// Immutable snapshot of a problem (statement + tests) at a given version for auditing old submissions.
+model ProblemVersion {
+  id        String   @id @default(uuid()) @db.Uuid
+  problemId String   @db.Uuid
+  version   Int
+  snapshot  Json
+  createdAt DateTime @default(now())
+
+  problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@unique([problemId, version])
+}
+
+model TestCase {
+  id             String  @id @default(uuid()) @db.Uuid
+  problemId      String  @db.Uuid
+  inputData      String
+  expectedOutput String
+  isSample       Boolean @default(false)
+  points         Int     @default(1)
+  orderIndex     Int
+
+  problem Problem            @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  results SubmissionResult[]
+
+  @@index([problemId, orderIndex])
+}
+
+model Submission {
+  id              String           @id @default(uuid()) @db.Uuid
+  userId          String           @db.Uuid
+  problemId       String           @db.Uuid
+  problemVersion  Int              @default(1)
+  sourceCode      String
+  status          SubmissionStatus @default(PENDING)
+  score           Int              @default(0)
+  executionTimeMs Int?
+  memoryUsedKb    Int?
+  compilerMessage String?
+  createdAt       DateTime         @default(now())
+  // Set when a worker claims the submission; used to detect crashed workers.
+  startedAt       DateTime?
+
+  user    User               @relation(fields: [userId], references: [id])
+  problem Problem            @relation(fields: [problemId], references: [id])
+  results SubmissionResult[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([problemId])
+  @@index([status, createdAt])
+}
+
+model SubmissionResult {
+  id              String           @id @default(uuid()) @db.Uuid
+  submissionId    String           @db.Uuid
+  testCaseId      String           @db.Uuid
+  status          SubmissionStatus
+  executionTimeMs Int?
+  memoryUsedKb    Int?
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  testCase   TestCase   @relation(fields: [testCaseId], references: [id])
+
+  @@unique([submissionId, testCaseId])
+}
+
+model UserProgress {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  problemId String    @db.Uuid
+  solved    Boolean   @default(false)
+  bestScore Int       @default(0)
+  attempts  Int       @default(0)
+  solvedAt  DateTime?
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problem Problem @relation(fields: [problemId], references: [id])
+
+  @@unique([userId, problemId])
+  @@index([userId, solved])
+}
+
+model LessonProgress {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @db.Uuid
+  lessonId    String    @db.Uuid
+  completed   Boolean   @default(false)
+  completedAt DateTime?
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lesson Lesson @relation(fields: [lessonId], references: [id])
+
+  @@unique([userId, lessonId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?  @db.Uuid
+  action     String
+  entityType String
+  entityId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt(sort: Desc)])
+}
+
+// Auto-saved editor contents, one row per user and problem.
+model CodeDraft {
+  userId    String   @db.Uuid
+  problemId String   @db.Uuid
+  code      String
+  updatedAt DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problem Problem @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@id([userId, problemId])
+}
